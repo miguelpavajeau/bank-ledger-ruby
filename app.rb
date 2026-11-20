@@ -4,8 +4,23 @@ require "sinatra/base"
 require "json"
 require_relative "lib/ledger"
 
+# Reads the request body once and keeps it. Rack 3 inputs are not guaranteed to be
+# rewindable, and Sinatra consumes form-encoded bodies while building params, which
+# is what clients like `curl -d` send even for JSON.
+class RawBody
+  def initialize(app) = @app = app
+
+  def call(env)
+    raw = env["rack.input"]&.read.to_s
+    env["ledger.raw_body"] = raw
+    env["rack.input"] = StringIO.new(raw)
+    @app.call(env)
+  end
+end
+
 # HTTP/JSON API over Ledger::Service.
 class LedgerApp < Sinatra::Base
+  use RawBody
   set :show_exceptions, false
   set :raise_errors, false
   set :ledger, nil # injected by config.ru and by the tests
@@ -63,6 +78,9 @@ class LedgerApp < Sinatra::Base
   end
 
   error do
+    err = env["sinatra.error"]
+    logger_io = env["rack.errors"] || $stderr
+    logger_io.puts("#{err.class}: #{err.message}", *Array(err.backtrace).first(8))
     json({ error: "internal error" }, 500) # never leak internals to clients
   end
 
@@ -80,7 +98,7 @@ class LedgerApp < Sinatra::Base
   end
 
   def payload
-    raw = request.body.read
+    raw = env.fetch("ledger.raw_body", "")
     raw.empty? ? {} : JSON.parse(raw).tap { |parsed| raise JSON::ParserError unless parsed.is_a?(Hash) }
   end
 

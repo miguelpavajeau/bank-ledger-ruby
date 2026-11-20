@@ -25,6 +25,13 @@ class ApiTest < Minitest::Test
     parsed["id"]
   end
 
+  def test_json_body_without_json_content_type
+    # curl -d and many clients send JSON as application/x-www-form-urlencoded.
+    post "/accounts", JSON.generate(owner: "ana", currency: "USD"),
+         "CONTENT_TYPE" => "application/x-www-form-urlencoded"
+    assert_equal 201, last_response.status
+  end
+
   def test_health
     get "/healthz"
     assert_equal 200, last_response.status
